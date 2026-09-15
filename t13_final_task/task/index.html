@@ -597,12 +597,11 @@
 
     async function loadConversations() {
         try {
-            // TODO:
-            // Send a GET request to API_URL + "/conversations".
-            // Parse the JSON response body — it returns an array of conversation summary objects,
-            // each containing id, title, message_count, created_at, updated_at.
-            // Store the result in a local "conversations" variable used by the rendering logic below.
-            const conversations = [];
+            const response = await fetch(`${API_URL}/conversations`);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            const conversations = await response.json();
 
             conversationsList.innerHTML = '';
 
@@ -664,12 +663,13 @@
 
     async function loadConversation(conversationId) {
         try {
-            // TODO:
-            // Send a GET request to API_URL + "/conversations/" + conversationId.
-            // If the response is not ok, throw an error.
-            // Parse the JSON response body — it returns the full conversation object including a "messages" array.
-            // Set currentConversationId to the given conversationId.
-            // Populate conversationHistory from conversation.messages (default to empty array if missing).
+            const response = await fetch(`${API_URL}/conversations/${conversationId}`);
+            if (!response.ok) {
+                throw new Error(`Failed to load conversation: HTTP ${response.status}`);
+            }
+            const conversation = await response.json();
+            currentConversationId = conversationId;
+            conversationHistory = conversation.messages || [];
 
             updateActiveConversation();
             renderMessages();
@@ -779,9 +779,12 @@
         }
 
         try {
-            // TODO:
-            // Send a DELETE request to API_URL + "/conversations/" + conversationId.
-            // If the response is not ok, throw an error.
+            const response = await fetch(`${API_URL}/conversations/${conversationId}`, {
+                method: 'DELETE'
+            });
+            if (!response.ok) {
+                throw new Error(`Failed to delete conversation: HTTP ${response.status}`);
+            }
 
             if (conversationId === currentConversationId) {
                 currentConversationId = null;
@@ -851,69 +854,182 @@
         const typingIndicator = addMessage('assistant', '', true);
 
         try {
-            // TODO (1 — create conversation if needed):
-            // If currentConversationId is null, send a POST request to API_URL + "/conversations"
-            // with Content-Type JSON and a body containing a "title" field — use the first 50 characters
-            // of the user message, appending "..." if it exceeds 50 characters.
-            // If the response is not ok, throw an error.
-            // Parse the JSON response and set currentConversationId from the returned conversation's id.
-            // Call loadConversations() to refresh the sidebar.
+            if (!currentConversationId) {
+                const title = userMessage.length > 50 ? userMessage.substring(0, 50) + '...' : userMessage;
+                const createResponse = await fetch(`${API_URL}/conversations`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({title})
+                });
+                if (!createResponse.ok) {
+                    throw new Error(`Failed to create conversation: HTTP ${createResponse.status}`);
+                }
+                const conversation = await createResponse.json();
+                currentConversationId = conversation.id;
+                await loadConversations();
+            }
+            conversationHistory.push(usermsg);
 
-            // TODO (2 — send the chat message):
-            // Send a POST request to API_URL + "/conversations/" + currentConversationId + "/chat"
-            // with Content-Type JSON and a body containing:
-            //   - message: the usermsg object (role + content)
-            //   - stream: true
-            // If the response is not ok, throw an error.
+            const response = await fetch(`${API_URL}/conversations/${currentConversationId}/chat`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({message: usermsg, stream: true})
+            });
+            if (!response.ok) {
+                throw new Error(`Chat request failed: HTTP ${response.status}`);
+            }
 
-            // TODO (3 — read the SSE stream):
-            // Obtain a ReadableStream reader from response.body and a TextDecoder.
-            // Declare tracking variables: assistantMessage, messageBubble, currentChunkContent (string),
-            // hasReceivedContent (bool), lastContentTime (Date.now()), pendingToolActivity (array),
-            // liveToolEl (element or null), receivedConversationId (bool).
-            //
-            // Set up a repeating interval (typingCheckInterval) every 100ms: if more than 750ms have
-            // passed since last content, content exists, and a typing indicator is not yet shown —
-            // flush currentChunkContent into conversationHistory, reset the message bubble state,
-            // and show a new typing indicator.
-            //
-            // Loop reading chunks until the reader signals done.
-            // For each chunk: decode bytes to text, split by newline, and for each line starting
-            // with "data: " extract the payload after the prefix. Then:
-            //
-            //   - If payload is "[DONE]": skip.
-            //   - Parse the payload as JSON, then handle by type:
-            //
-            //   - parsed.conversation_id (first event only): acknowledge and continue.
-            //
-            //   - parsed.error: throw an error with the error message.
-            //
-            //   - parsed.tool_activity: push the activity into pendingToolActivity.
-            //     On the first tool event, create a live indicator bubble (CSS class
-            //     "tool-calling-bubble") and append it to messagesContainer.
-            //     Update its label text: if type is "call" show "Calling <name>...",
-            //     if type is "result" show "<name> responded". Scroll to bottom.
-            //
-            //   - parsed.choices with delta.content present:
-            //     Remove currentTypingIndicator and liveToolEl if they exist.
-            //     On the first content chunk, remove the initial typingIndicator and create
-            //     a new assistant message bubble via addMessage.
-            //     Append the content to currentChunkContent, mark hasReceivedContent true,
-            //     update lastContentTime, re-render the bubble with marked.parse, scroll to bottom.
-            //
-            //   - parsed.choices with an empty delta (no content): update lastContentTime;
-            //     if no assistant bubble exists yet, create one.
-            //
-            // After the read loop ends:
-            //   - Clear typingCheckInterval.
-            //   - Remove currentTypingIndicator and liveToolEl if still present.
-            //   - If pendingToolActivity has entries, build a tool history dropdown via
-            //     createToolHistoryDropdown and insert it before the assistant message
-            //     (or append if there is none). Scroll to bottom.
-            //   - If currentChunkContent has content, push it to conversationHistory as an
-            //     assistant message object.
-            //   - If no content was ever received, remove the empty assistant message element.
-            //   - Call loadConversations() to refresh the sidebar.
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let assistantMessage = null;
+            let messageBubble = null;
+            let currentChunkContent = '';
+            let hasReceivedContent = false;
+            let lastContentTime = Date.now();
+            let pendingToolActivity = [];
+            let liveToolEl = null;
+            let receivedConversationId = false;
+            let currentTypingIndicator = null;
+            let initialTypingRemoved = false;
+
+            const typingCheckInterval = setInterval(() => {
+                if (Date.now() - lastContentTime > 750 && currentChunkContent && !currentTypingIndicator) {
+                    conversationHistory.push({role: 'assistant', content: currentChunkContent});
+                    currentChunkContent = '';
+                    assistantMessage = null;
+                    messageBubble = null;
+                    currentTypingIndicator = addMessage('assistant', '', true);
+                }
+            }, 100);
+
+            const ensureAssistantBubble = () => {
+                if (!initialTypingRemoved) {
+                    typingIndicator.remove();
+                    initialTypingRemoved = true;
+                }
+                if (!assistantMessage) {
+                    assistantMessage = addMessage('assistant', '', false, true);
+                    messageBubble = assistantMessage.querySelector('.message-bubble');
+                }
+            };
+
+            const handlePayload = (payload) => {
+                if (payload === '[DONE]') return;
+                let parsed;
+                try {
+                    parsed = JSON.parse(payload);
+                } catch (e) {
+                    console.warn('Skipping malformed SSE payload', payload);
+                    return;
+                }
+
+                if (parsed.conversation_id && !receivedConversationId) {
+                    receivedConversationId = true;
+                    return;
+                }
+
+                if (parsed.error) {
+                    throw new Error(parsed.error.message || parsed.error);
+                }
+
+                if (parsed.tool_activity) {
+                    const activity = parsed.tool_activity;
+                    pendingToolActivity.push(activity);
+                    if (!initialTypingRemoved) {
+                        typingIndicator.remove();
+                        initialTypingRemoved = true;
+                    }
+                    if (currentTypingIndicator) {
+                        currentTypingIndicator.remove();
+                        currentTypingIndicator = null;
+                    }
+                    if (!liveToolEl) {
+                        liveToolEl = document.createElement('div');
+                        liveToolEl.className = 'message assistant';
+                        liveToolEl.innerHTML = '<div class="message-bubble tool-calling-bubble"><div class="tool-calling-spinner"></div><span class="tool-calling-label"></span></div>';
+                        messagesContainer.appendChild(liveToolEl);
+                    }
+                    const label = liveToolEl.querySelector('.tool-calling-label');
+                    label.textContent = activity.type === 'call'
+                        ? `🔧 Calling ${activity.name}...`
+                        : `✅ ${activity.name || 'Tool'} responded`;
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    return;
+                }
+
+                if (parsed.choices && parsed.choices.length > 0) {
+                    const delta = parsed.choices[0].delta || {};
+                    if (delta.content) {
+                        if (currentTypingIndicator) {
+                            currentTypingIndicator.remove();
+                            currentTypingIndicator = null;
+                        }
+                        if (liveToolEl) {
+                            liveToolEl.remove();
+                            liveToolEl = null;
+                        }
+                        ensureAssistantBubble();
+                        currentChunkContent += delta.content;
+                        hasReceivedContent = true;
+                        lastContentTime = Date.now();
+                        messageBubble.innerHTML = marked.parse(currentChunkContent);
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    } else {
+                        lastContentTime = Date.now();
+                        if (!assistantMessage && !hasReceivedContent) {
+                            ensureAssistantBubble();
+                        }
+                    }
+                }
+            };
+
+            try {
+                while (true) {
+                    const {done, value} = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, {stream: true});
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            handlePayload(line.slice(6).trim());
+                        }
+                    }
+                }
+                if (buffer.startsWith('data: ')) {
+                    handlePayload(buffer.slice(6).trim());
+                }
+            } finally {
+                clearInterval(typingCheckInterval);
+            }
+
+            if (!initialTypingRemoved) {
+                typingIndicator.remove();
+            }
+            if (currentTypingIndicator) {
+                currentTypingIndicator.remove();
+            }
+            if (liveToolEl) {
+                liveToolEl.remove();
+            }
+            if (pendingToolActivity.length > 0) {
+                const dropdown = createToolHistoryDropdown(pendingToolActivity);
+                const lastAssistant = assistantMessage && assistantMessage.isConnected ? assistantMessage : null;
+                if (lastAssistant) {
+                    messagesContainer.insertBefore(dropdown, lastAssistant);
+                } else {
+                    messagesContainer.appendChild(dropdown);
+                }
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+            if (currentChunkContent) {
+                conversationHistory.push({role: 'assistant', content: currentChunkContent});
+            }
+            if (!hasReceivedContent && assistantMessage) {
+                assistantMessage.remove();
+            }
+            await loadConversations();
 
         } catch (error) {
             console.error('Error:', error);

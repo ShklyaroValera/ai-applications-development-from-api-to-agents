@@ -39,8 +39,12 @@ class ReadSkillTool(BaseTool):
         }
 
     async def _execute(self, arguments: dict[str, Any]) -> str:
-        #TODO:
-        # - Strip leading "/" from arguments["path"], resolve full path under self._skills_dir
-        # - Return error string if path not found or not a file
-        # - Return file contents as UTF-8 string
-        raise NotImplementedError()
+        rel_path = str(arguments["path"]).lstrip("/")
+        full_path = (self._skills_dir / rel_path).resolve()
+        if not full_path.is_relative_to(self._skills_dir):
+            return f"ERROR: Path is outside of the skills directory: {arguments['path']}"
+        if not full_path.exists():
+            return f"ERROR: File not found: {arguments['path']}"
+        if not full_path.is_file():
+            return f"ERROR: Not a file: {arguments['path']}"
+        return full_path.read_text(encoding="utf-8")
