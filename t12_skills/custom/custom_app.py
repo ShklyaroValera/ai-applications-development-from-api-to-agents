@@ -66,15 +66,37 @@ async def main():
     system_prompt = build_system_prompt(skills)
     print(f"📄 System prompt: \n {system_prompt}")
 
-    #TODO:
-    # - Initialize the messages list with a SYSTEM message containing the system_prompt
-    # - Build the tools list:
-    #   - ReadSkillTool (pass SKILLS_DIR)
-    #   - PythonCodeInterpreterTool (use async factory .create() with MCP_URL, MCP_TOOL_NAME, SKILLS_DIR)
-    # - Create a T12Agent with an OpenAI client, model "gpt-5.2", and the tools list
-    # - Run a chat loop: read user input, break on "exit",
-    #   append USER message, call agent.chat_completion, append the returned assistant message
-    raise NotImplementedError()
+    messages: list[Message] = [Message(role=Role.SYSTEM, content=system_prompt)]
+
+    interpreter_tool = await PythonCodeInterpreterTool.create(
+        mcp_url=MCP_URL,
+        tool_name=MCP_TOOL_NAME,
+        skills_dir=SKILLS_DIR,
+    )
+    tools: list[BaseTool] = [
+        ReadSkillTool(skills_dir=SKILLS_DIR),
+        interpreter_tool,
+    ]
+
+    agent = T12Agent(
+        client=OpenAI(api_key=OPENAI_API_KEY),
+        model="gpt-5.2",
+        tools=tools,
+    )
+
+    try:
+        while True:
+            user_input = input("➡️: ").strip()
+            if user_input.lower() == "exit":
+                break
+
+            messages.append(Message(role=Role.USER, content=user_input))
+            assistant_message = await agent.chat_completion(messages=messages, log_messages=True)
+            messages.append(assistant_message)
+    finally:
+        # close the MCP session in the same task it was opened in, otherwise asyncio.run() shutdown
+        # cancels the streamable-http generator from another task and prints a RuntimeError traceback
+        await interpreter_tool._mcp_client.close()
 
 
 if __name__ == "__main__":

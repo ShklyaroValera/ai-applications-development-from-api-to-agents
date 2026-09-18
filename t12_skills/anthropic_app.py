@@ -7,20 +7,40 @@ from commons.constants import ANTHROPIC_API_KEY
 
 SKILLS_VERSION = "skills-2025-10-02"
 
+def _field(obj, *names):
+    """anthropic SDK >= 1.x models renamed fields (display_title -> display_name, latest_version -> latest_version_id),
+    while the API still returns the old ones - read whichever is present."""
+    for name in names:
+        value = getattr(obj, name, None)
+        if value:
+            return value
+    return None
+
+
 def get_or_create_skill(skill_title: str, skill_dir: Path,  client: anthropic.Anthropic) -> str:
-    #TODO:
-    # - List all custom skills using the beta skills API (source="custom", betas=[SKILLS_VERSION])
-    # - If a skill with matching display_title already exists, print its info and return its ID
-    # - Otherwise create a new skill with the title and files from skill_dir (use anthropic.lib.files_from_dir)
-    # - Print the new skill ID and return it
-    raise NotImplementedError()
+    skills = client.beta.skills.list(source="custom", betas=[SKILLS_VERSION])
+    for skill in skills.data:
+        if _field(skill, "display_title", "display_name") == skill_title:
+            print(f"Skill already exists: {skill.id} (latest version: {_field(skill, 'latest_version', 'latest_version_id')})")
+            return skill.id
+
+    skill = client.beta.skills.create(
+        display_name=skill_title,  # anthropic SDK >= 1.x: `display_title` was renamed to `display_name`
+        files=anthropic.lib.files_from_dir(str(skill_dir)),
+        betas=[SKILLS_VERSION],
+    )
+    print(f"Skill uploaded: {skill.id}")
+    return skill.id
 
 def delete_skills(client: anthropic.Anthropic):
-    #TODO:
-    # - List all custom skills
-    # - For each skill, list all its versions and delete each one (print confirmation per version)
-    # - Then delete the skill itself (print confirmation)
-    raise NotImplementedError()
+    skills = client.beta.skills.list(source="custom", betas=[SKILLS_VERSION])
+    for skill in skills.data:
+        versions = client.beta.skills.versions.list(skill.id, betas=[SKILLS_VERSION])
+        for version in versions.data:
+            client.beta.skills.versions.delete(_field(version, "version", "id"), skill_id=skill.id, betas=[SKILLS_VERSION])
+            print(f"Deleted version {_field(version, 'version', 'id')} of skill '{_field(skill, 'display_title', 'display_name')}'")
+        client.beta.skills.delete(skill_id=skill.id, betas=[SKILLS_VERSION])
+        print(f"Deleted skill '{_field(skill, 'display_title', 'display_name')}' ({skill.id})")
 
 def chat(client: anthropic.Anthropic, skill_id: str, log_request: bool=True, log_response: bool = True):
     """Multi-turn chat loop that reuses the container across turns."""
@@ -36,18 +56,51 @@ def chat(client: anthropic.Anthropic, skill_id: str, log_request: bool=True, log
 
         messages.append({"role": "user", "content": user_input})
 
-        #TODO:
-        # - Build a container dict with the skill reference (type "custom", skill_id, version "latest")
-        # - If container_id is already set, include it in the container dict to reuse the running container
-        # - Build the full request_payload (model, max_tokens, messages, container, betas, tools)
-        #   Note: betas must include "code-execution-2025-08-25" and SKILLS_VERSION; tool type is "code_execution_20250825"
-        # - If log_request is True, print the request payload as indented JSON
-        # - Call client.beta.messages.create with the request payload
-        # - If log_response is True, print the full response as indented JSON;
-        #   otherwise join all text blocks from response.content and print as "Claude: <text>"
-        # - If the response has a container, save its ID to container_id for reuse on next turns
-        # - Append the assistant message to messages (role "assistant", content response.content)
-        raise NotImplementedError()
+        container = {
+            "skills": [
+                {
+                    "type": "custom",
+                    "skill_id": skill_id,
+                    "version": "latest",
+                }
+            ]
+        }
+        if container_id:
+            container["id"] = container_id
+
+        request_payload = {
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 4096,
+            "messages": messages,
+            "container": container,
+            "betas": ["code-execution-2025-08-25", SKILLS_VERSION],
+            "tools": [
+                {
+                    "type": "code_execution_20250825",
+                    "name": "code_execution",
+                }
+            ],
+        }
+
+        if log_request:
+            print("\n--- REQUEST ---")
+            print(json.dumps(request_payload, indent=2, default=str))
+            print("---------------\n")
+
+        response = client.beta.messages.create(**request_payload)
+
+        if log_response:
+            print("\n--- RESPONSE ---")
+            print(json.dumps(response.model_dump(), indent=2, default=str))
+            print("----------------\n")
+        else:
+            reply = " ".join(block.text for block in response.content if getattr(block, "type", None) == "text")
+            print(f"\nClaude: {reply}\n")
+
+        if getattr(response, "container", None):
+            container_id = response.container.id
+
+        messages.append({"role": "assistant", "content": response.content})
 
 
 
@@ -59,12 +112,17 @@ CALCULATOR_SKILL_TITLE = "calculator"
 CALCULATOR_SKILL_DIR = Path(__file__).parent / "_skills" / CALCULATOR_SKILL_TITLE
 
 def main():
-    #TODO:
-    # - Create an Anthropic client
-    # - Call get_or_create_skill (choose STYLE_SKILL or CALCULATOR_SKILL dir/title to test)
-    # - Call chat with the client and skill_id
-    # - Call delete_skills to clean up after the session
-    raise NotImplementedError()
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    # To test the calculator skill, switch to CALCULATOR_SKILL_TITLE / CALCULATOR_SKILL_DIR
+    skill_id = get_or_create_skill(
+        skill_title=STYLE_SKILL_TITLE,
+        skill_dir=STYLE_SKILL_DIR,
+        client=client,
+    )
+    try:
+        chat(client, skill_id)
+    finally:
+        delete_skills(client)
 
 
 if __name__ == "__main__":
