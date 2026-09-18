@@ -28,11 +28,13 @@ class BaseAgent(ABC):
         Raises:
             ValueError: If ``api_key`` is empty or blank.
         """
-        #TODO:
-        # 1. Validate `api_key` — raise ValueError("API key cannot be null or empty") if it is empty or blank
-        # 2. Assign `self._model`, `self._api_key`, `self._system_prompt`
-        # 3. Build `self._tools_dict` as {tool.name: tool} for each tool in `tools`
-        raise NotImplementedError()
+        if not api_key or not api_key.strip():
+            raise ValueError("API key cannot be null or empty")
+
+        self._model = model
+        self._api_key = api_key
+        self._system_prompt = system_prompt
+        self._tools_dict: dict[str, BaseTool] = {tool.name: tool for tool in tools} if tools else {}
 
     @abstractmethod
     def get_response(self, messages: list[Message], print_request: bool = True) -> Message:

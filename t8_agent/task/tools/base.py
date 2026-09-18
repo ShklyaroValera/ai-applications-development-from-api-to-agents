@@ -81,9 +81,14 @@ class BaseTool(ABC):
         expects in the ``tools`` array.
         https://developers.openai.com/api/docs/guides/function-calling#defining-functions
         """
-        #TODO:
-        # Provide dict with tool configuration in according to OpenAI Spec
-        raise NotImplementedError
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.input_schema,
+            },
+        }
 
     @property
     def anthropic_schema(self) -> dict[str, Any]:
@@ -94,6 +99,8 @@ class BaseTool(ABC):
         ``tools`` array (no ``"type": "function"`` wrapper).
         https://platform.claude.com/docs/en/api/messages/create#create.tools
         """
-        #TODO:
-        # Provide dict with tool configuration in according to Anthropic Spec
-        raise NotImplementedError
+        return {
+            "name": self.name,
+            "description": self.description,
+            "input_schema": self.input_schema,
+        }

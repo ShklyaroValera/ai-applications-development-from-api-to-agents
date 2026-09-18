@@ -14,22 +14,52 @@ class WebSearchTool(BaseTool):
 
     @property
     def name(self) -> str:
-        #TODO: Provide tool name as `web_search_tool`
-        raise NotImplementedError()
+        return "web_search_tool"
 
     @property
     def description(self) -> str:
-        #TODO: Provide description of this tool
-        raise NotImplementedError()
+        return (
+            "Tool for WEB searching. Use it to find up-to-date public information on the internet "
+            "(e.g. facts about a person or company) when it is not available in the User Service."
+        )
 
     @property
     def input_schema(self) -> dict[str, Any]:
-        #TODO: Provide tool params Schema (it applies `request` string to search by)
-        raise NotImplementedError()
+        return {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "string",
+                    "description": "The search query or question to search for on the web",
+                }
+            },
+            "required": ["request"],
+        }
 
     def execute(self, arguments: dict[str, Any]) -> str:
-        #TODO:
         # https://developers.openai.com/api/docs/guides/tools-web-search
-        # 1. Make POST call to `gpt-5.2` with request "tools": [{"type": "web_search"}],
-        # 4. Check if response status is 200 and if yes then return message content, otherwise return `f"Error: {response.status_code} {response.text}"`
-        raise NotImplementedError()
+        headers = {
+            "Authorization": self.__api_key,
+            "Content-Type": "application/json",
+        }
+        request_data = {
+            "model": "gpt-5.2",
+            "tools": [{"type": "web_search"}],
+            "input": str(arguments.get("request", "")),
+        }
+
+        try:
+            response = requests.post(url=self.__endpoint, headers=headers, json=request_data)
+        except Exception as e:
+            return f"Error while performing web search: {str(e)}"
+
+        if response.status_code != 200:
+            return f"Error: {response.status_code} {response.text}"
+
+        data = response.json()
+        for item in data.get("output", []):
+            if item.get("type") == "message":
+                for block in item.get("content", []):
+                    if block.get("type") == "output_text":
+                        return block.get("text", "")
+        return "No result returned from web search."
