@@ -18,5 +18,31 @@ services:
       timeout: 5s
       retries: 5
 
+  # Optional (README "Experiment 2"). Heavy image (~4GB), started ONLY with:
+  #   docker compose --profile ollama up -d
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    profiles: ["ollama"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    restart: unless-stopped
+
+  ollama-init:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    depends_on:
+      - ollama
+    entrypoint: >
+      /bin/sh -c "sleep 5 && ollama pull nomic-embed-text"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    restart: "no"
+
 volumes:
   rag-advanced-task:
+  ollama_data:

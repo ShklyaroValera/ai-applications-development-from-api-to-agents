@@ -3,8 +3,6 @@ import json
 import requests
 
 
-
-
 class EmbeddingsClient:
     _endpoint: str
     _api_key: str
@@ -33,36 +31,25 @@ class EmbeddingsClient:
             dimensions: number of dimensions
             print_response: to print response in chat or not
         """
-        #TODO:
-        # ---
-        # https://developers.openai.com/api/reference/resources/embeddings/methods/create
-        # ---
-        # Provide implementation that will generate embeddings for `inputs` list (don't forget about dimensions) with
-        # Embedding model and return back a dict with indexed embeddings (key is index from input list and value vector list)
+        headers = {
+            "Authorization": self._api_key,
+            "Content-Type": "application/json",
+        }
+        request_data = {
+            "input": inputs,
+            "model": self._model_name,
+            "dimensions": dimensions,
+        }
 
+        response = requests.post(url=self._endpoint, headers=headers, json=request_data, timeout=60)
 
-# Hint:
-# Request:
-# curl https://api.openai.com/v1/embeddings \
-#   -H "Content-Type: application/json" \
-#   -H "Authorization: Bearer $OPENAI_API_KEY" \
-#   -d '{
-#     "input": "Your text string goes here",
-#     "model": "text-embedding-3-small",
-#     "dimensions": 384
-#   }'
-#
-#  Response JSON:
-#  {
-#     "data": [
-#         {
-#             "embedding": [
-#                 0.19686688482761383,
-#                 ...
-#             ],
-#             "index": 0,
-#             "object": "embedding"
-#         }
-#     ],
-#     ...
-#  }
+        if response.status_code != 200:
+            raise Exception(f"HTTP {response.status_code}: {response.text}")
+
+        response_json = response.json()
+        if print_response:
+            print("\n" + "=" * 50 + " RESPONSE " + "=" * 50)
+            print(json.dumps(response_json, indent=2))
+            print("=" * 110)
+
+        return {item["index"]: item["embedding"] for item in response_json.get("data", [])}
