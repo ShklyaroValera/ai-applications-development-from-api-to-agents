@@ -67,7 +67,8 @@ class GeminiAIClient(AIClient):
         contents = []
         for msg in messages:
             contents.append({
-                "role": msg.role.value,
+                # Gemini accepts only "user" and "model" roles (multi-turn would fail with "assistant")
+                "role": "model" if msg.role == Role.ASSISTANT else "user",
                 "parts": [{"text": msg.content}]
             })
         return contents
