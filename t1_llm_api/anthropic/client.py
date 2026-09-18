@@ -28,14 +28,9 @@ class AnthropicAIClient(AIClient):
             api_key (str): The Anthropic API key for authentication.
             system_prompt (str): The system instruction to guide Claude's behavior.
         """
-        #TODO:
-        # Call to __init__ of super class
-        # Add Anthropic and AsyncAnthropic clients https://github.com/anthropics/anthropic-sdk-python?tab=readme-ov-file#usage
-        # (In readme you can find samples with both of these clients)
-        # Useful links with request/response samples:
-        #   - https://docs.anthropic.com/en/api/overview
-        #   - https://docs.anthropic.com/en/api/messages
-        raise NotImplementedError
+        super().__init__(endpoint, model_name, api_key, system_prompt)
+        self._client = Anthropic(api_key=api_key)
+        self._async_client = AsyncAnthropic(api_key=api_key)
 
     def response(self, messages: list[Message], **kwargs) -> Message:
         """
@@ -53,12 +48,16 @@ class AnthropicAIClient(AIClient):
             Response content blocks are concatenated into a single text response.
             The response is printed to stdout before being returned.
         """
-        #TODO:
-        # - Add System prompt
-        # - Call client
-        # - Print response to console
-        # - Return ASSISTANT message
-        raise NotImplementedError
+        # System prompt goes into a separate `system` param, not into messages
+        response = self._client.messages.create(
+            model=self._model_name,
+            system=self._system_prompt,
+            max_tokens=kwargs.get("max_tokens", 1024),
+            messages=[message.to_dict() for message in messages],
+        )
+        content = "".join(block.text for block in response.content if block.type == "text")
+        print(content)
+        return Message(role=Role.ASSISTANT, content=content)
 
     async def stream_response(self, messages: list[Message], **kwargs) -> Message:
         """
@@ -78,10 +77,18 @@ class AnthropicAIClient(AIClient):
             Listens for 'content_block_delta' events with text deltas.
             Each delta is printed to stdout as it arrives for real-time display.
         """
-        #TODO:
-        # - Add System prompt
-        # - Call client with streaming mode
-        # - Handle stream with chunks
-        # - Print response to console
-        # - Return ASSISTANT message
-        raise NotImplementedError
+        contents = []
+        stream = await self._async_client.messages.create(
+            model=self._model_name,
+            system=self._system_prompt,
+            max_tokens=kwargs.get("max_tokens", 1024),
+            messages=[message.to_dict() for message in messages],
+            stream=True,
+        )
+        async for event in stream:
+            if event.type == "content_block_delta" and event.delta.type == "text_delta":
+                print(event.delta.text, end="", flush=True)
+                contents.append(event.delta.text)
+
+        print()
+        return Message(role=Role.ASSISTANT, content="".join(contents))

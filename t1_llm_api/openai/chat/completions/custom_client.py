@@ -35,15 +35,22 @@ class CustomOpenAIClient(BaseOpenAIClient):
             The system prompt is automatically prepended to the messages.
             The response is printed to stdout before being returned.
         """
-        #TODO:
-        # https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create
-        # - Prepare headers with authorization and content type
-        # - Prepare message history with System prompt
-        # - Execute post request to AI API (use `requests`)
-        # - Parse response
-        # - Print response to console
-        # - Return ASSISTANT message
-        raise NotImplementedError
+        request_data = {
+            "model": self._model_name,
+            "messages": self._prepare_messages(messages),
+        }
+
+        response = requests.post(url=self._endpoint, headers=self._headers(), json=request_data)
+        if response.status_code != 200:
+            raise Exception(f"HTTP {response.status_code}: {response.text}")
+
+        choices = response.json().get("choices", [])
+        if not choices:
+            raise ValueError("No choices present in the response")
+
+        content = choices[0].get("message", {}).get("content") or ""
+        print(content)
+        return Message(role=Role.ASSISTANT, content=content)
 
     async def stream_response(self, messages: list[Message], **kwargs) -> Message:
         """
@@ -64,13 +71,50 @@ class CustomOpenAIClient(BaseOpenAIClient):
             Each token is printed to stdout as it arrives.
             Uses Server-Sent Events (SSE) format where each line starts with "data: ".
         """
-        #TODO:
-        # https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create (Streaming tab)
-        # - Prepare headers with authorization and content type
-        # - Prepare message history with System prompt
-        # - Execute post request to AI API (use `aihttp`)
-        # - Handle stream with chunks
-        # - Parse response
-        # - Print chunks to console
-        # - Return ASSISTANT message
-        raise NotImplementedError
+        request_data = {
+            "model": self._model_name,
+            "messages": self._prepare_messages(messages),
+            "stream": True,
+        }
+        contents = []
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url=self._endpoint, headers=self._headers(), json=request_data) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"HTTP {response.status}: {error_text}")
+
+                # SSE: every event is a line `data: {json}`, the stream ends with `data: [DONE]`
+                async for line in response.content:
+                    line_str = line.decode("utf-8").strip()
+                    if not line_str.startswith("data: "):
+                        continue
+                    data = line_str[len("data: "):].strip()
+                    if data == "[DONE]":
+                        break
+                    if snippet := self._get_content_snippet(data):
+                        print(snippet, end="", flush=True)
+                        contents.append(snippet)
+
+        print()
+        return Message(role=Role.ASSISTANT, content="".join(contents))
+
+    def _headers(self) -> dict[str, str]:
+        # self._api_key is already formatted as `Bearer <key>` by BaseOpenAIClient
+        return {
+            "Authorization": self._api_key,
+            "Content-Type": "application/json",
+        }
+
+    def _prepare_messages(self, messages: list[Message]) -> list[dict]:
+        return [
+            {"role": Role.SYSTEM.value, "content": self._system_prompt},
+            *[message.to_dict() for message in messages],
+        ]
+
+    @staticmethod
+    def _get_content_snippet(data: str) -> str:
+        chunk = json.loads(data)
+        if choices := chunk.get("choices"):
+            return choices[0].get("delta", {}).get("content") or ""
+        return ""

@@ -19,5 +19,5 @@ gemini_custom_client = CustomGeminiAIClient(
 )
 
 asyncio.run(
-    start(False, gemini_custom_client)
+    start(True, gemini_client)
 )

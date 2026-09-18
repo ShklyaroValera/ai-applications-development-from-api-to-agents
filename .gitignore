@@ -1,0 +1,6 @@
+# local run evidence (logs, screenshots)
+evidence/
+.venv/
+__pycache__/
+*.pyc
+.env

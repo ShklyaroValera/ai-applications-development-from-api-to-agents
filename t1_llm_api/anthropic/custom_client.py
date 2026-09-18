@@ -36,15 +36,19 @@ class CustomAnthropicAIClient(AIClient):
             Claude's API returns content as an array of content blocks.
             The response is printed to stdout before being returned.
         """
-        #TODO:
-        # https://docs.anthropic.com/en/api/messages-examples
-        # - Prepare headers with api key, anthropic version and content type
-        # - Add System prompt
-        # - Execute post request to AI API (use `requests`)
-        # - Parse response
-        # - Print response to console
-        # - Return ASSISTANT message
-        raise NotImplementedError
+        request_data = self._request_data(messages, **kwargs)
+
+        response = requests.post(url=self._endpoint, headers=self._headers(), json=request_data)
+        if response.status_code != 200:
+            raise Exception(f"HTTP {response.status_code}: {response.text}")
+
+        content_blocks = response.json().get("content", [])
+        if not content_blocks:
+            raise ValueError("No content blocks present in the response")
+
+        content = "".join(block.get("text", "") for block in content_blocks if block.get("type") == "text")
+        print(content)
+        return Message(role=Role.ASSISTANT, content=content)
 
     async def stream_response(self, messages: list[Message], **kwargs) -> Message:
         """
@@ -66,14 +70,48 @@ class CustomAnthropicAIClient(AIClient):
             Stops processing when 'message_stop' event is received.
             Each delta is printed to stdout as it arrives.
         """
-        #TODO:
-        # https://docs.anthropic.com/en/docs/build-with-claude/streaming
-        # - Prepare headers with api key, anthropic version and content type
-        # - Add System prompt
-        # - Execute post request to AI API (use `aihttp`)
-        # - Handle stream with chunks
-        # - Parse response
-        # - Print chunks to console
-        # - Return ASSISTANT message
-        raise NotImplementedError
+        request_data = self._request_data(messages, **kwargs)
+        request_data["stream"] = True
+        contents = []
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url=self._endpoint, headers=self._headers(), json=request_data) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"HTTP {response.status}: {error_text}")
+
+                # SSE: `event: <type>` + `data: {json}`; the event type is also present in the payload `type`
+                async for line in response.content:
+                    line_str = line.decode("utf-8").strip()
+                    if not line_str.startswith("data: "):
+                        continue
+                    data = json.loads(line_str[len("data: "):])
+                    event_type = data.get("type")
+                    if event_type == "content_block_delta":
+                        delta = data.get("delta", {})
+                        if delta.get("type") == "text_delta" and (text := delta.get("text")):
+                            print(text, end="", flush=True)
+                            contents.append(text)
+                    elif event_type == "error":
+                        raise Exception(f"Stream error: {data.get('error')}")
+                    elif event_type == "message_stop":
+                        break
+
+        print()
+        return Message(role=Role.ASSISTANT, content="".join(contents))
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "x-api-key": self._api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+
+    def _request_data(self, messages: list[Message], **kwargs) -> dict:
+        return {
+            "model": self._model_name,
+            "system": self._system_prompt,
+            "max_tokens": kwargs.get("max_tokens", 1024),
+            "messages": [message.to_dict() for message in messages],
+        }
 

@@ -36,15 +36,19 @@ class CustomGeminiAIClient(AIClient):
             Uses 'x-goog-api-key' header for authentication.
             Response candidates contain content parts that are concatenated.
         """
-        #TODO:
-        # https://ai.google.dev/gemini-api/docs/text-generation
-        # - Prepare headers with api key and content type
-        # - Add System prompt
-        # - Execute post request to AI API (use `requests`)
-        # - Parse response
-        # - Print response to console
-        # - Return ASSISTANT message
-        raise NotImplementedError
+        url = f"{self._endpoint}/{self._model_name}:generateContent"
+
+        response = requests.post(url=url, headers=self._headers(), json=self._request_data(messages, **kwargs))
+        if response.status_code != 200:
+            raise Exception(f"HTTP {response.status_code}: {response.text}")
+
+        candidates = response.json().get("candidates", [])
+        if not candidates:
+            raise ValueError("No candidates present in the response")
+
+        content = self._extract_text(candidates[0])
+        print(content)
+        return Message(role=Role.ASSISTANT, content=content)
 
     async def stream_response(self, messages: list[Message], **kwargs) -> Message:
         """
@@ -66,13 +70,51 @@ class CustomGeminiAIClient(AIClient):
             Each SSE chunk contains candidates with content parts.
             Each text chunk is printed to stdout as it arrives.
         """
-        #TODO:
-        # https://ai.google.dev/gemini-api/docs/text-generation
-        # - Prepare headers with api key and content type
-        # - Add System prompt
-        # - Execute post request to AI API (use `aiohttp`)
-        # - Handle stream with chunks
-        # - Parse response
-        # - Print chunks to console
-        # - Return ASSISTANT message
-        raise NotImplementedError
+        url = f"{self._endpoint}/{self._model_name}:streamGenerateContent?alt=sse"
+        contents = []
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url=url, headers=self._headers(), json=self._request_data(messages, **kwargs)) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"HTTP {response.status}: {error_text}")
+
+                # SSE: every chunk is `data: {json}` with the same structure as the non-streaming response
+                async for line in response.content:
+                    line_str = line.decode("utf-8").strip()
+                    if not line_str.startswith("data: "):
+                        continue
+                    data = json.loads(line_str[len("data: "):])
+                    for candidate in data.get("candidates", [])[:1]:
+                        if text := self._extract_text(candidate):
+                            print(text, end="", flush=True)
+                            contents.append(text)
+
+        print()
+        return Message(role=Role.ASSISTANT, content="".join(contents))
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "x-goog-api-key": self._api_key,
+            "Content-Type": "application/json",
+        }
+
+    def _request_data(self, messages: list[Message], **kwargs) -> dict:
+        return {
+            "system_instruction": {"parts": [{"text": self._system_prompt}]},
+            "contents": [
+                {
+                    # Gemini uses role `model` instead of `assistant`
+                    "role": "model" if message.role == Role.ASSISTANT else "user",
+                    "parts": [{"text": message.content}],
+                }
+                for message in messages
+            ],
+            "generationConfig": {"maxOutputTokens": kwargs.get("max_tokens", 1024)},
+        }
+
+    @staticmethod
+    def _extract_text(candidate: dict) -> str:
+        parts = candidate.get("content", {}).get("parts", [])
+        # skip thought-summary parts, keep only answer text
+        return "".join(part.get("text", "") for part in parts if not part.get("thought"))
