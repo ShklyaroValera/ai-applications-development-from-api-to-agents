@@ -57,13 +57,13 @@ class StdioMCPClient(MCPClient):
         self._session_context = None
 
     def _build_server_params(self) -> StdioServerParameters:
-        #TODO:
-        # Build and return a `StdioServerParameters` depending on the launch mode:
-        # - If `self.docker_image` is set — return StdioServerParameters with:
-        #     command="docker", args=["run", "--rm", "-i", self.docker_image], env=self.env
-        # - Otherwise — return StdioServerParameters with:
-        #     command=self.command, args=self.args, env=self.env
-        raise NotImplementedError()
+        if self.docker_image:
+            return StdioServerParameters(
+                command="docker",
+                args=["run", "--rm", "-i", self.docker_image],
+                env=self.env,
+            )
+        return StdioServerParameters(command=self.command, args=self.args, env=self.env)
 
     def _startup_message(self) -> str:
         if self.docker_image:
@@ -74,21 +74,21 @@ class StdioMCPClient(MCPClient):
         return f"Starting local stdio server: {self.command} {' '.join(self.args)}"
 
     async def __aenter__(self):
-        #TODO:
-        # 1. Call `_build_server_params()` and assign to `server_params`
-        # 2. Print startup message via `_startup_message()`
-        # 3. Call `stdio_client(server_params)` and assign to `self._stdio_context`
-        # 4. Call `await self._stdio_context.__aenter__()` and unpack to `read_stream, write_stream`
-        # 5. Create `ClientSession(read_stream, write_stream)` and assign to `self._session_context`
-        # 6. Call `await self._session_context.__aenter__()` and assign to `self.session`
-        # 7. Call `await self.session.initialize()`, assign to `init_result`, and print:
-        #    `f"Capabilities: {init_result.model_dump_json(indent=2)}"`
-        # 8. Return self
-        raise NotImplementedError()
+        server_params = self._build_server_params()
+        print(self._startup_message())
+
+        self._stdio_context = stdio_client(server_params)
+        read_stream, write_stream = await self._stdio_context.__aenter__()
+
+        self._session_context = ClientSession(read_stream, write_stream)
+        self.session = await self._session_context.__aenter__()
+
+        init_result = await self.session.initialize()
+        print(f"Capabilities: {init_result.model_dump_json(indent=2)}")
+        return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        #TODO:
-        # This is the shutdown method.
-        # 1. If `self._session_context` is present — call `await self._session_context.__aexit__(exc_type, exc_val, exc_tb)`
-        # 2. If `self._stdio_context` is present — call `await self._stdio_context.__aexit__(exc_type, exc_val, exc_tb)`
-        raise NotImplementedError()
+        if self._session_context:
+            await self._session_context.__aexit__(exc_type, exc_val, exc_tb)
+        if self._stdio_context:
+            await self._stdio_context.__aexit__(exc_type, exc_val, exc_tb)

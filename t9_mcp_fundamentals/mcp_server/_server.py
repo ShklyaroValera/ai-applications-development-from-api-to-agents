@@ -5,50 +5,66 @@ from mcp.server.fastmcp import FastMCP
 from commons.user_service.client import UserServiceClient
 from commons.user_service.user_info import UserSearchRequest, UserCreate, UserUpdate
 
-#TODO:
-# 1. Create instance of FastMCP as `mcp` (or another name if you wish) with:
-#       - name is "users-management-mcp-server",
-#       - host is "0.0.0.0",
-#       - port is 8005,
-# 2. Create UserServiceClient
+mcp = FastMCP(
+    name="users-management-mcp-server",
+    host="0.0.0.0",
+    port=8005,
+    log_level="INFO",
+)
+
+user_client = UserServiceClient()
 
 
 # ==================== TOOLS ====================
-#TODO:
-# You need to add all the tools here. You will need to create 5 async methods and mark them as @mcp.tool() (if you
-# named FastMCP not as `mcp` then use the name that you have used). All tools return `str`.
-# Don't forget about tool description, it will LLM to identify when some particular tool should be used.
-# https://gofastmcp.com/servers/tools
-# ---
-# Tools:
-# 1. `get_user_by_id`:-
-# 2. `delete_user`:-
-# 3. `search_user`:-
-# 4. `add_user`:-
-# 5. `update_user`:-
+
+@mcp.tool()
+async def get_user_by_id(user_id: int) -> str:
+    """Provides full user information by user_id"""
+    return user_client.get_user(user_id)
+
+
+@mcp.tool()
+async def delete_user(user_id: int) -> str:
+    """Deletes user by user_id"""
+    return user_client.delete_user(user_id)
+
+
+@mcp.tool()
+async def search_user(search_user_request: UserSearchRequest) -> str:
+    """Searches for users by name, surname, email and gender (partial, case-insensitive matching)"""
+    return user_client.search_users(**search_user_request.model_dump())
+
+
+@mcp.tool()
+async def add_user(user_create_model: UserCreate) -> str:
+    """Adds new user into the Users Management Service"""
+    return user_client.add_user(user_create_model)
+
+
+@mcp.tool()
+async def update_user(user_id: int, user_update_model: UserUpdate) -> str:
+    """Updates user by user_id with provided fields"""
+    return user_client.update_user(user_id, user_update_model)
+
 
 # ==================== MCP RESOURCES ====================
 
-#TODO:
-# Provides screenshot with Swagger endpoints of User Service. We need for the case to show you that MCP servers can
-# provide some static resources.
-# https://gofastmcp.com/servers/resources
-# ---
-# 1. Create async method `get_flow_diagram` that returns bytes and mark as `@mcp.resource` with:
-#   - uri = "users-management://flow-diagram"
-#   - mime_type="image/png"
-# 2. You need to get `flow.png` picture from `mcp_server` folder and return it as bytes.
-# 3. Don't forget to provide resource description
+@mcp.resource("users-management://flow-diagram", mime_type="image/png")
+async def get_flow_diagram() -> bytes:
+    """The Users Management Service flow diagram as PNG image"""
+    # flow.png lives in the t9_mcp_fundamentals root folder (next to README.md)
+    image_path = Path(__file__).parent.parent / "flow.png"
+    if not image_path.exists():
+        raise FileNotFoundError(f"flow.png not found at {image_path}")
+    return image_path.read_bytes()
 
 
 # ==================== MCP PROMPTS ====================
 
-#TODO:
-# Provides static prompts that can be used by Clients
-# https://gofastmcp.com/servers/prompts
-# ---
-# Prompts are prepared, you need just properly return them and provide descriptions of them"
-"""
+@mcp.prompt()
+async def user_search_assistant_prompt() -> str:
+    """Helps users formulate effective search queries"""
+    return """
 You are helping users search through a dynamic user database. The database contains 
 realistic synthetic user profiles with the following searchable fields:
 
@@ -98,8 +114,11 @@ When helping users search, suggest multiple search strategies and explain
 why certain approaches might be more effective for their goals.
 """
 
-# Guides creation of realistic user profiles
-"""
+
+@mcp.prompt()
+async def user_profile_creation_prompt() -> str:
+    """Guides creation of realistic user profiles"""
+    return """
 You are helping create realistic user profiles for the system. Follow these guidelines 
 to ensure data consistency and realism.
 
@@ -169,4 +188,3 @@ When creating profiles, aim for diversity in:
 - Socioeconomic backgrounds
 - Cultural backgrounds
 """
-
