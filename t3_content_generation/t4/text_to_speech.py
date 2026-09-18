@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from pathlib import Path
 
 import requests
 
@@ -33,14 +34,48 @@ class Voice:
 # Response:
 #   bytes with audio
 
-#TODO:
-# You need to convert text to speech:
-#   - Create Client that will go to speech OpenAI API
-#   - Call API
-#   - Get response and save as .mp3 file
-# ---
-# Hints:
-#   - Use /v1/audio/speech endpoint
-#   - Use gpt-4o-mini-tts model
+# Task: convert text to speech via /v1/audio/speech with `gpt-4o-mini-tts` and save the binary response as .mp3.
+
+_CURRENT_DIR = Path(__file__).parent
 
 
+class OpenAISpeechClient:
+
+    def __init__(self, endpoint: str = OPENAI_HOST + "/v1/audio/speech"):
+        api_key = OPENAI_API_KEY
+        if not api_key:
+            raise ValueError("API key cannot be null or empty")
+
+        self._api_key = "Bearer " + api_key
+        self._endpoint = endpoint
+
+    def call(self, print_request: bool = True, **kwargs) -> Path:
+        headers = {
+            "Authorization": self._api_key,
+            "Content-Type": "application/json"
+        }
+
+        if print_request:
+            print(json.dumps(kwargs, indent=2))
+
+        response = requests.post(url=self._endpoint, headers=headers, json=kwargs)
+
+        if response.status_code == 200:
+            voice = kwargs.get("voice", "voice")
+            output_file = _CURRENT_DIR / f"speech_{voice}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp3"
+            with open(output_file, "wb") as f:
+                f.write(response.content)
+            print(f"Audio saved to {output_file}")
+            return output_file
+
+        raise Exception(f"HTTP {response.status_code}: {response.text}")
+
+
+if __name__ == "__main__":
+    client = OpenAISpeechClient()
+    client.call(
+        model="gpt-4o-mini-tts",
+        input="Why can't we say that black is white?",
+        voice=Voice.coral,  # Experiment with other voices: Voice.alloy, Voice.nova, Voice.onyx, ...
+        instructions="Speak in a cheerful and positive tone.",
+    )
